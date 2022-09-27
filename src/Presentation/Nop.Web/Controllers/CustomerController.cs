@@ -363,55 +363,141 @@ namespace Nop.Web.Controllers
                 if (!_gdprSettings.LogUserProfileChanges)
                     return;
 
-                if (oldCustomerInfoModel.Gender != newCustomerInfoModel.Gender)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.Gender")} = {newCustomerInfoModel.Gender}");
-
-                if (oldCustomerInfoModel.FirstName != newCustomerInfoModel.FirstName)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.FirstName")} = {newCustomerInfoModel.FirstName}");
-
-                if (oldCustomerInfoModel.LastName != newCustomerInfoModel.LastName)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.LastName")} = {newCustomerInfoModel.LastName}");
-
-                if (oldCustomerInfoModel.ParseDateOfBirth() != newCustomerInfoModel.ParseDateOfBirth())
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.DateOfBirth")} = {newCustomerInfoModel.ParseDateOfBirth()}");
-
-                if (oldCustomerInfoModel.Email != newCustomerInfoModel.Email)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.Email")} = {newCustomerInfoModel.Email}");
-
-                if (oldCustomerInfoModel.Company != newCustomerInfoModel.Company)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.Company")} = {newCustomerInfoModel.Company}");
-
-                if (oldCustomerInfoModel.StreetAddress != newCustomerInfoModel.StreetAddress)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.StreetAddress")} = {newCustomerInfoModel.StreetAddress}");
-
-                if (oldCustomerInfoModel.StreetAddress2 != newCustomerInfoModel.StreetAddress2)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.StreetAddress2")} = {newCustomerInfoModel.StreetAddress2}");
-
-                if (oldCustomerInfoModel.ZipPostalCode != newCustomerInfoModel.ZipPostalCode)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.ZipPostalCode")} = {newCustomerInfoModel.ZipPostalCode}");
-
-                if (oldCustomerInfoModel.City != newCustomerInfoModel.City)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.City")} = {newCustomerInfoModel.City}");
-
-                if (oldCustomerInfoModel.County != newCustomerInfoModel.County)
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.County")} = {newCustomerInfoModel.County}");
-
-                if (oldCustomerInfoModel.CountryId != newCustomerInfoModel.CountryId)
-                {
-                    var countryName = (await _countryService.GetCountryByIdAsync(newCustomerInfoModel.CountryId))?.Name;
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.Country")} = {countryName}");
-                }
-
-                if (oldCustomerInfoModel.StateProvinceId != newCustomerInfoModel.StateProvinceId)
-                {
-                    var stateProvinceName = (await _stateProvinceService.GetStateProvinceByIdAsync(newCustomerInfoModel.StateProvinceId))?.Name;
-                    await _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{await _localizationService.GetResourceAsync("Account.Fields.StateProvince")} = {stateProvinceName}");
-                }
+                await LogOldCustomerGdprAsync(customer, oldCustomerInfoModel, newCustomerInfoModel);
             }
             catch (Exception exception)
             {
                 await _logger.ErrorAsync(exception.Message, exception, customer);
             }
+        }
+
+        private Task LogOldCustomerGdprAsync(Customer customer, CustomerInfoModel oldCustomerInfoModel, CustomerInfoModel newCustomerInfoModel)
+        {
+            //Create the list with the right capacity so we dont waste any cpu making it grow
+            //but at the same time is more flexible than an array
+            var tasks = new List<Task>(13);
+
+            if (oldCustomerInfoModel.CountryId != newCustomerInfoModel.CountryId)
+            {
+                var countryLog = _countryService.GetCountryByIdAsync(newCustomerInfoModel.CountryId).ContinueWith(getCountryResult =>
+                {
+                    if (getCountryResult.Exception != null)
+                        throw getCountryResult.Exception;
+
+                    var countryName = getCountryResult.Result?.Name ?? "Unkown";
+                    return _localizationService.GetResourceAsync("Account.Fields.Country").ContinueWith(getResourceResult =>
+                    {
+                        _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{getCountryResult.Result} = {countryName}");
+                    });
+                });
+                tasks.Add(countryLog);
+            }
+
+            if (oldCustomerInfoModel.StateProvinceId != newCustomerInfoModel.StateProvinceId)
+            {
+                var stateProvinceLog = _stateProvinceService.GetStateProvinceByIdAsync(newCustomerInfoModel.CountryId).ContinueWith(getStateProvinceResult =>
+                {
+                    if (getStateProvinceResult.Exception != null)
+                        throw getStateProvinceResult.Exception;
+
+                    var stateProvince = getStateProvinceResult.Result?.Name ?? "Unkown";
+                    return _localizationService.GetResourceAsync("Account.Fields.StateProvince").ContinueWith(getResourceResult =>
+                    {
+                        _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{getStateProvinceResult.Result} = {stateProvince}");
+                    });
+                });
+                tasks.Add(stateProvinceLog);
+            }
+
+            if (oldCustomerInfoModel.Gender != newCustomerInfoModel.Gender)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.Gender").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.Gender}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.FirstName != newCustomerInfoModel.FirstName)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.FirstName").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.FirstName}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.LastName != newCustomerInfoModel.LastName)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.LastName").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.LastName}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.ParseDateOfBirth() != newCustomerInfoModel.ParseDateOfBirth())
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.DateOfBirth").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.ParseDateOfBirth()}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.Email != newCustomerInfoModel.Email)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.Email").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.Email}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.Company != newCustomerInfoModel.Company)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.Company").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.Company}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.StreetAddress != newCustomerInfoModel.StreetAddress)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.StreetAddress").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.StreetAddress}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.StreetAddress2 != newCustomerInfoModel.StreetAddress2)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.StreetAddress2").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.StreetAddress2}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.ZipPostalCode != newCustomerInfoModel.ZipPostalCode)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.ZipPostalCode").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.ZipPostalCode}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.City != newCustomerInfoModel.City)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.City").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.City}");
+                }));
+            }
+
+            if (oldCustomerInfoModel.County != newCustomerInfoModel.County)
+            {
+                tasks.Add(_localizationService.GetResourceAsync("Account.Fields.County").ContinueWith(queryResult =>
+                {
+                    return _gdprService.InsertLogAsync(customer, 0, GdprRequestType.ProfileChanged, $"{queryResult.Result} = {newCustomerInfoModel.County}");
+                }));
+            }
+
+            return Task.WhenAll(tasks);
         }
 
         #endregion
